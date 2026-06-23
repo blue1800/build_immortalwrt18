@@ -1,0 +1,40 @@
+config globals 'globals'
+	option ula_prefix 'fd48:xxxx:xxxx::/48'
+
+# WAN口：对接主路由，DHCP获取上级IP，网关指向主路由
+config interface 'wan'
+	option proto 'dhcp'
+	option device 'eth0'
+	option metric '10'
+
+# LAN管理口：后台固定192.168.100.18，纯管理不开启DHCP（旁路由关闭DHCP）
+config interface 'lan'
+	option type 'bridge'
+	option device 'eth1'
+	option proto 'static'
+	option ipaddr '192.168.100.18'
+	option netmask '255.255.255.0'
+	# 无本地网关，流量走wan上级
+	option igmp_snooping '1'
+
+# 桥接防火墙区域
+config zone 'wan'
+	option name 'wan'
+	option input 'REJECT'
+	option output 'ACCEPT'
+	option forward 'REJECT'
+	option masq '1'
+	option mtu_fix '1'
+	list network 'wan'
+
+config zone 'lan'
+	option name 'lan'
+	option input 'ACCEPT'
+	option output 'ACCEPT'
+	option forward 'ACCEPT'
+	list network 'lan'
+
+# LAN/WAN互通转发规则
+config forwarding
+	option src 'lan'
+	option dest 'wan'
