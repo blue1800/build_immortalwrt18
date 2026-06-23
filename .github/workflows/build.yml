@@ -1,67 +1,70 @@
+name: Build ImmortalWrt x86_64 24.10
 
-name: Build ImmortalWrt 24.10
-# 触发条件：推送main分支、手动运行workflow
+# 触发方式：推送main分支、手动点击编译
 on:
   push:
     branches: main
   workflow_dispatch:
 
 env:
-  # ImmortalWrt源码仓库与分支
-  REPO_URL: https://github.com/immortalwrt/immortalwrt.git
-  REPO_BRANCH: openwrt-24.10
-  CONFIG_FILE: config.default
-  TZ: Asia/Shanghai
+  SOURCE_REPO: immortalwrt/immortalwrt
+  SOURCE_BRANCH: openwrt-24.10
+  CONFIG_NAME: config.default
+  TIME_ZONE: Asia/Shanghai
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  compile:
+    runs-on: ubuntu-22.04
     steps:
-      - name: 拉取本仓库配置文件
+      - name: 拉取仓库配置
         uses: actions/checkout@v4
 
-      - name: 初始化编译环境
+      - name: 安装编译依赖
         run: |
-          sudo apt update
-          sudo bash -c 'bash <(curl -s https://build-scripts.immortalwrt.org/init_build_environment.sh)'
-          git config --global user.name "CI Builder"
-          git config --global user.email "ci@github.com"
+          sudo apt update -y
+          sudo apt full-upgrade -y
+          sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3-distutils rsync unzip zlib1g-dev file wget
+          git config --global user.name "CI-Builder"
+          git config --global user.email "builder@github.com"
 
-      - name: 克隆ImmortalWrt源码
+      - name: 克隆 ImmortalWrt 源码
         run: |
-          git clone --depth 1 -b $REPO_BRANCH $REPO_URL openwrt
+          git clone --depth 1 -b $SOURCE_BRANCH https://github.com/$SOURCE_REPO.git openwrt
           cd openwrt
-          cp ../$CONFIG_FILE .config
+          cp ../$CONFIG_NAME .config
           cp -r ../files/ ./ || true
 
-      - name: 执行前置自定义脚本diy-part1
+      - name: 执行前置脚本 diy-part1.sh
         run: cd openwrt && bash ../diy-part1.sh
 
-      - name: 更新feeds软件源
+      - name: 更新并安装 feeds
         run: cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
 
-      - name: 预下载源码包（解决编译断流）
-        run: cd openwrt && make download -j$(nproc) V=s
+      - name: 预下载源码包（防止编译中途超时）
+        run: cd openwrt && make download -j$(nproc)
 
-      - name: 编译固件
+      - name: 编译固件 x86_64
         run: cd openwrt && make -j$(nproc) V=s
 
-      - name: 后置自定义脚本diy-part2
+      - name: 执行后置脚本 diy-part2.sh
         run: cd openwrt && bash ../diy-part2.sh
 
-      - name: 上传固件到Artifacts（网页下载）
+      - name: 上传固件到 Artifacts（保留30天）
         uses: actions/upload-artifact@v4
         with:
-          name: ImmortalWrt-Firmware
-          path: openwrt/bin/targets/*/*/*.bin
+          name: ImmortalWrt-x86-firmware
+          path: openwrt/bin/targets/x86/64/*.img openwrt/bin/targets/x86/64/*.bin
           retention-days: 30
 
-      # 可选：自动发布Release固件（需要GH_TOKEN）
-      - name: 发布Release
+      # 自动发布Release固件（永久保存，需配置GH_TOKEN）
+      - name: 发布 Release
         uses: softprops/action-gh-release@v1
         if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         with:
           tag_name: build-${{ github.run_number }}
-          files: openwrt/bin/targets/*/*/*.bin
+          name: 编译版本 ${{ github.run_number }}
+          files: |
+            openwrt/bin/targets/x86/64/*.img
+            openwrt/bin/targets/x86/64/*.bin
