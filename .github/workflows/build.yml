@@ -1,1 +1,67 @@
 
+name: Build ImmortalWrt 24.10
+# 触发条件：推送main分支、手动运行workflow
+on:
+  push:
+    branches: main
+  workflow_dispatch:
+
+env:
+  # ImmortalWrt源码仓库与分支
+  REPO_URL: https://github.com/immortalwrt/immortalwrt.git
+  REPO_BRANCH: openwrt-24.10
+  CONFIG_FILE: config.default
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取本仓库配置文件
+        uses: actions/checkout@v4
+
+      - name: 初始化编译环境
+        run: |
+          sudo apt update
+          sudo bash -c 'bash <(curl -s https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+          git config --global user.name "CI Builder"
+          git config --global user.email "ci@github.com"
+
+      - name: 克隆ImmortalWrt源码
+        run: |
+          git clone --depth 1 -b $REPO_BRANCH $REPO_URL openwrt
+          cd openwrt
+          cp ../$CONFIG_FILE .config
+          cp -r ../files/ ./ || true
+
+      - name: 执行前置自定义脚本diy-part1
+        run: cd openwrt && bash ../diy-part1.sh
+
+      - name: 更新feeds软件源
+        run: cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
+
+      - name: 预下载源码包（解决编译断流）
+        run: cd openwrt && make download -j$(nproc) V=s
+
+      - name: 编译固件
+        run: cd openwrt && make -j$(nproc) V=s
+
+      - name: 后置自定义脚本diy-part2
+        run: cd openwrt && bash ../diy-part2.sh
+
+      - name: 上传固件到Artifacts（网页下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImmortalWrt-Firmware
+          path: openwrt/bin/targets/*/*/*.bin
+          retention-days: 30
+
+      # 可选：自动发布Release固件（需要GH_TOKEN）
+      - name: 发布Release
+        uses: softprops/action-gh-release@v1
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          tag_name: build-${{ github.run_number }}
+          files: openwrt/bin/targets/*/*/*.bin
